@@ -1,0 +1,305 @@
+---
+title: "Mobile Money and the Gender Gap in Financial Inclusion"
+subtitle: "Evidence from the Global Findex 2025"
+author: "Pietro Zecca"
+date: today
+format:
+  beamer:
+    theme: Madrid
+    colortheme: default
+    fontsize: 11pt
+    fig-width: 6
+    fig-height: 4
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+---
+title: "Mobile Money and the Gender Gap in Financial Inclusion"
+subtitle: "Evidence from the Global Findex 2025"
+author: "Pietro Zecca"
+format:
+  beamer:
+    theme: Madrid
+    colortheme: seahorse
+    aspectratio: 169
+knitr:
+  opts_chunk:
+    echo: false
+    message: false
+    warning: false
+    fig.align: 'center'
+---
+
+```{r setup}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(ggrepel)
+
+df_raw <- read_csv("data/GlobalFindexDatabase2025.csv")
+
+# Subset 1: country-level aggregates for 2024
+df_all <- df_raw %>%
+  filter(year == 2024, group2 == "all")
+
+# Subset 2: gender breakdown for 2024
+df_gender <- df_raw %>%
+  filter(year == 2024, group == "gender")
+
+# Subset 3: one row per country with gender gap computed
+df_gap <- df_gender %>%
+  select(
+    countrynewwb, regionwb24_hi, incomegroupwb24,
+    group2, account_t_d, mobileaccount_t_d, fiaccount_t_d
+  ) %>%
+  pivot_wider(
+    names_from  = group2,
+    values_from = c(account_t_d, mobileaccount_t_d, fiaccount_t_d)
+  ) %>%
+  mutate(gender_gap = account_t_d_men - account_t_d_women) %>%
+  filter(!is.na(gender_gap))
+```
+
+## Overview
+
+- **Question:** Does mobile money access help close the gender gap in financial inclusion?
+- **Data:** World Bank Global Findex 2025 — 152 countries, 2024
+- **Approach:** Descriptive analysis, covariation, and regression
+- **Finding:** Mobile money is negatively associated with the gender gap,
+  but the effect is modest and not statistically significant —
+  suggesting broader structural barriers remain
+
+## Data
+
+:::: {.columns}
+::: {.column width="48%"}
+\small
+- **Source:** World Bank Global Findex 2025
+- **Coverage:** 152 countries, 2024
+- **Unit of analysis:** Country-level averages by gender
+- **Key variables:**
+  - *Account ownership:* share of adults with a financial account
+  - *Mobile money:* share of adults with a mobile money account
+  - *Gender gap:* men's minus women's account ownership rate
+    (positive = men higher)
+:::
+::: {.column width="52%"}
+```{r}
+# Summary statistics table
+df_gap %>%
+  filter(!is.na(incomegroupwb24)) %>%
+  summarise(
+    `Mean ownership, men`   = mean(account_t_d_men,   na.rm = TRUE),
+    `Mean ownership, women` = mean(account_t_d_women, na.rm = TRUE),
+    `Mean gender gap`       = mean(gender_gap,        na.rm = TRUE),
+    `Max gender gap`        = max(gender_gap,         na.rm = TRUE),
+    `Min gender gap`        = min(gender_gap,         na.rm = TRUE)
+  ) %>%
+  pivot_longer(
+    everything(),
+    names_to  = "Statistic",
+    values_to = "Value"
+  ) %>%
+  mutate(Value = scales::percent(Value, accuracy = 0.1)) %>%
+  kable(
+    format   = "latex",
+    booktabs = TRUE,
+    align    = c("l", "r")
+  ) %>%
+  kable_styling(font_size = 9, latex_options = "hold_position")
+```
+:::
+::::
+
+## Financial Inclusion Around the World
+
+:::: {.columns}
+::: {.column width="35%"}
+\small
+- Account ownership varies dramatically across regions
+- Middle East & North Africa shows the lowest median
+- High-income countries cluster near full inclusion
+:::
+::: {.column width="65%"}
+```{r fig-region, fig.width=4.5, fig.asp=0.75}
+# Clean region labels once and reuse
+df_all_clean <- df_all %>%
+  filter(!is.na(regionwb24_hi)) %>%
+  mutate(
+    regionwb24_hi = str_remove(
+      regionwb24_hi, " \\(excluding high income\\)"
+    )
+  )
+
+region_medians <- df_all_clean %>%
+  group_by(regionwb24_hi) %>%
+  summarize(med = median(account_t_d, na.rm = TRUE))
+
+df_all_clean %>%
+  ggplot(aes(
+    x = fct_reorder(regionwb24_hi, account_t_d, median),
+    y = account_t_d
+  )) +
+  geom_boxplot(fill = "steelblue", alpha = 0.7, color = "gray30") +
+  geom_text(
+    data = region_medians,
+    aes(
+      x     = regionwb24_hi,
+      y     = med,
+      label = scales::percent(med, accuracy = 1)
+    ),
+    hjust = -0.2, size = 3, fontface = "bold"
+  ) +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    x       = NULL,
+    y       = "Account ownership (% of adults)",
+    caption = "Source: World Bank Global Findex 2025"
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(plot.margin = margin(t = 5, r = 5, b = 20, l = 5))
+```
+:::
+::::
+
+## Mobile Money and the Gender Gap
+
+:::: {.columns}
+::: {.column width="35%"}
+\small
+- Countries with higher mobile money adoption show a smaller
+  gender gap
+- The negative trend is largely driven by Sub-Saharan Africa's
+  high mobile money adoption
+- Considerable variation around the trend suggests other factors
+  are at play
+:::
+::: {.column width="65%"}
+```{r fig-scatter, fig.width=4, fig.asp=0.85}
+# Clean region labels and identify outliers
+df_gap_clean <- df_gap %>%
+  filter(!is.na(mobileaccount_t_d_women), !is.na(regionwb24_hi)) %>%
+  mutate(
+    regionwb24_hi = str_remove(
+      regionwb24_hi, " \\(excluding high income\\)"
+    )
+  )
+
+outliers <- df_gap_clean %>%
+  filter(
+    mobileaccount_t_d_women > quantile(
+      mobileaccount_t_d_women, 0.85, na.rm = TRUE
+    ) |
+    gender_gap > quantile(gender_gap, 0.90, na.rm = TRUE) |
+    gender_gap < quantile(gender_gap, 0.10, na.rm = TRUE)
+  )
+
+df_gap_clean %>%
+  ggplot(aes(
+    x     = mobileaccount_t_d_women,
+    y     = gender_gap,
+    color = regionwb24_hi
+  )) +
+  geom_point(alpha = 0.7, size = 1.5) +
+  geom_smooth(
+    method = "lm", se = FALSE,
+    color = "gray30", linetype = "dashed"
+  ) +
+  geom_text_repel(
+    data      = outliers,
+    aes(label = countrynewwb),
+    size = 2, fontface = "bold", max.overlaps = 15
+  ) +
+  scale_x_continuous(labels = scales::percent) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    x       = "Mobile money ownership, women (% adults)",
+    y       = "Gender gap in account ownership",
+    color   = NULL,
+    caption = "Source: World Bank Global Findex 2025"
+  ) +
+  theme_minimal(base_size = 9) +
+  theme(
+  legend.position = "bottom",
+  legend.text     = element_text(size = 5),
+  legend.key.size = unit(0.25, "cm")
+) +
+guides(color = guide_legend(nrow = 3))
+```
+:::
+::::
+
+## Regression Analysis
+
+:::: {.columns}
+::: {.column width="50%"}
+```{r fig-coef, fig.width=3.8, fig.asp=0.85, fig.cap=NULL}
+# Fit model and build coefficient plot data
+m1 <- lm(
+  gender_gap ~ mobileaccount_t_d_women + incomegroupwb24,
+  data = df_gap
+)
+
+coef_df <- coef(summary(m1)) %>%
+  as.data.frame() %>%
+  rownames_to_column("Term") %>%
+  filter(Term != "(Intercept)") %>%
+  mutate(
+    Term = case_when(
+      Term == "mobileaccount_t_d_women"           ~ "Mobile money,\nwomen",
+      Term == "incomegroupwb24Low income"          ~ "Low income",
+      Term == "incomegroupwb24Lower middle income" ~ "Lower middle\nincome",
+      Term == "incomegroupwb24Upper middle income" ~ "Upper middle\nincome"
+    ),
+    lower = Estimate - 1.96 * `Std. Error`,
+    upper = Estimate + 1.96 * `Std. Error`
+  )
+
+ggplot(coef_df, aes(
+  x = Estimate,
+  y = fct_reorder(Term, Estimate)
+)) +
+  geom_vline(
+    xintercept = 0, linetype = "dashed", color = "gray50"
+  ) +
+  geom_errorbarh(
+    aes(xmin = lower, xmax = upper),
+    height = 0.2, color = "gray30"
+  ) +
+  geom_point(size = 2.5, color = "steelblue") +
+  labs(
+    x       = "Coefficient estimate (95% CI)",
+    y       = NULL,
+    caption = "Source: World Bank Global Findex 2025"
+  ) +
+  theme_minimal(base_size = 9)
+```
+:::
+::: {.column width="50%"}
+\small
+- Mobile money shows a negative but marginally significant
+  association (p = 0.089)
+- Income group adds little explanatory power
+- Structural barriers beyond income and mobile access
+  likely drive the gap
+:::
+::::
+
+
+## Conclusion
+
+**Mobile money alone won't close the gender gap.**
+
+- Account ownership gaps persist across most regions, even where
+  mobile money is widespread
+- Mobile money shows a negative but marginally significant
+  association with the gender gap (p = 0.089)
+- Structural barriers beyond income and mobile access —
+  legal rights, education, social norms — likely drive the gap
+
+*Future work: longitudinal analysis tracking how mobile money
+expansion affects within-country gender gaps over time*

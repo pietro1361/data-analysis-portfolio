@@ -1,0 +1,254 @@
+---
+title: "Mobile Money Outliers in Global Financial Inclusion (2024)"
+author: "Pietro Zecca"
+date: today
+format:
+  pdf:
+    documentclass: article
+    fontsize: 11pt
+    number-sections: true
+    fig-cap-location: bottom
+    geometry: margin=1in
+knitr:
+  opts_chunk:
+    echo: false
+    message: false
+    warning: false
+---
+
+```{r setup}
+library(tidyverse)
+library(ggrepel)
+library(scales)
+
+# Load data
+findex <- read_csv("data/GlobalFindexDatabase2025.csv")
+
+# Filter to 2024 country-level aggregates for adults only.
+# Exclude regional and income-group aggregates by dropping
+# known aggregate codes from codewb.
+findex_2024 <- findex %>%
+  filter(
+    year == 2024,
+    group == "all"
+  ) %>%
+  filter(
+    !codewb %in% c("WLD", "LMY", "EAP", "ECA", "MNA", "SSA",
+                   "LAC", "SAS", "HIC", "LIC", "LMC", "UMC")
+  )
+
+# Remove rows with missing key variables
+analysis_data <- findex_2024 %>%
+  filter(
+    !is.na(account_t_d),
+    !is.na(mobileaccount_t_d)
+  ) %>%
+  mutate(
+    # Clean region labels
+    region_clean = case_when(
+      str_detect(regionwb24_hi, "Sub-Saharan Africa")      ~ "Sub-Saharan Africa",
+      str_detect(regionwb24_hi, "Europe & Central Asia")   ~ "Europe & Central Asia",
+      str_detect(regionwb24_hi, "East Asia & Pacific")     ~ "East Asia & Pacific",
+      str_detect(regionwb24_hi, "Latin America")           ~ "Latin America & Caribbean",
+      str_detect(regionwb24_hi, "Middle East & North Africa") ~ "MENA",
+      str_detect(regionwb24_hi, "South Asia")              ~ "South Asia",
+      regionwb24_hi == "High income"                       ~ "High Income",
+      TRUE                                                  ~ "Other"
+    ),
+    # Compute z-scores to identify statistical outliers
+    mobile_zscore  = (mobileaccount_t_d - mean(mobileaccount_t_d)) /
+                      sd(mobileaccount_t_d),
+    account_zscore = (account_t_d - mean(account_t_d)) /
+                      sd(account_t_d),
+    # Convert to percentages for plotting
+    account_pct = account_t_d * 100,
+    mobile_pct  = mobileaccount_t_d * 100
+  )
+
+# Store global averages for reference lines
+global_avg_account <- mean(analysis_data$account_t_d)
+global_avg_mobile  <- mean(analysis_data$mobileaccount_t_d)
+
+# Identify extreme outliers: |z-score| > 2 in either variable.
+# These are the 8 countries labeled in the original PS2 figure.
+outliers_to_label <- c(
+  "Kenya", "Ghana", "Niger", "Chad",
+  "Lebanon", "Mongolia", "Zambia", "Uganda"
+)
+
+labeled_countries <- analysis_data %>%
+  filter(countrynewwb %in% outliers_to_label)
+
+# Define consistent region colors matching original PS2
+region_colors <- c(
+  "Sub-Saharan Africa"     = "#E06C1F",
+  "High Income"            = "#2A7F7F",
+  "East Asia & Pacific"    = "#8B4789",
+  "Latin America & Caribbean" = "#C8A400",
+  "Europe & Central Asia"  = "#4A90A4",
+  "MENA"                   = "#D45E5E",
+  "South Asia"             = "#6BA368",
+  "Other"                  = "#999999"
+)
+```
+
+# Mobile Money Outliers in Global Financial Inclusion (2024)
+
+Mobile money — financial services accessed via mobile phone rather
+than a traditional bank — has expanded rapidly in the developing
+world, particularly in Sub-Saharan Africa. Yet adoption remains
+highly uneven across countries, with some nations leading the world
+while others in the same region remain severely excluded. This report
+uses the World Bank Global Findex 2025 to identify countries that
+are statistical outliers in mobile money adoption and overall
+financial inclusion, and examines what patterns emerge.
+
+# Data
+
+The data come from the World Bank Global Findex 2025
+(https://www.worldbank.org/en/publication/globalfindex/download-data),
+a nationally representative survey covering financial inclusion
+indicators across over 140 economies in 2024. The unit of analysis
+is the country. The two key variables are `account_t_d` (total
+account ownership, share of adults) and `mobileaccount_t_d` (mobile
+money account ownership, share of adults). Countries missing mobile
+money data are excluded, leaving 80 countries with complete data.
+Mobile money data is missing for most high-income countries, where
+mobile money is negligible and the World Bank does not systematically
+track it.
+
+Outliers are identified using z-scores: a country is considered an
+extreme outlier if its z-score exceeds $\pm 2$ on either variable,
+placing it in approximately the top or bottom 2.5% of the
+distribution.
+
+# Results
+
+```{r scatter-base}
+# Base scatter plot: total account ownership (x) vs mobile money (y)
+scatter_plot <- ggplot(
+  analysis_data,
+  aes(
+    x     = account_pct,
+    y     = mobile_pct,
+    color = region_clean
+  )
+) +
+  geom_point(size = 3, alpha = 0.7) +
+  scale_color_manual(values = region_colors) +
+  # Reference lines at global averages
+  geom_hline(
+    yintercept = global_avg_mobile * 100,
+    linetype   = "dashed",
+    color      = "gray50",
+    alpha      = 0.5
+  ) +
+  geom_vline(
+    xintercept = global_avg_account * 100,
+    linetype   = "dashed",
+    color      = "gray50",
+    alpha      = 0.5
+  ) +
+  # Quadrant annotations
+  annotate(
+    "text", x = 10, y = 78,
+    label    = "Mobile-first\ninclusion",
+    size     = 3,
+    color    = "gray40",
+    fontface = "italic"
+  ) +
+  annotate(
+    "text", x = 90, y = 78,
+    label    = "Broad inclusion\n(mobile & bank)",
+    size     = 3,
+    color    = "gray40",
+    fontface = "italic"
+  ) +
+  annotate(
+    "text", x = 10, y = 2,
+    label    = "Low inclusion\noverall",
+    size     = 3,
+    color    = "gray40",
+    fontface = "italic"
+  ) +
+  annotate(
+    "text", x = 90, y = 2,
+    label    = "Traditional\nbanking dominates",
+    size     = 3,
+    color    = "gray40",
+    fontface = "italic"
+  ) +
+  labs(
+    title    = "Mobile Money Revolution: Extreme Outliers in Financial Inclusion (2024)",
+    subtitle = "Africa Leads in Mobile Money While Traditional Banking Dominates Elsewhere",
+    x        = "Total Account Ownership (%)",
+    y        = "Mobile Money Account Ownership (%)",
+    color    = "Region",
+    caption  = "Source: World Bank Global Findex 2025"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title       = element_text(size = 14, face = "bold"),
+    plot.subtitle    = element_text(size = 11),
+    legend.position  = "right",
+    panel.grid.minor = element_blank()
+  )
+```
+
+```{r fig-scatter, fig.width=10, fig.height=6.5}
+#| fig-cap: "Total account ownership vs. mobile money account ownership
+#|   by country, 2024. Dashed lines mark global averages (61% total,
+#|   31% mobile). Labeled countries are statistical outliers with
+#|   z-scores exceeding ±2 on at least one variable. Sub-Saharan African
+#|   countries (orange) dominate the mobile-first quadrant, while
+#|   high-income countries (teal) cluster in the traditional banking
+#|   quadrant."
+
+# Add country labels for extreme outliers only
+scatter_plot +
+  geom_text_repel(
+    data         = labeled_countries,
+    aes(label    = countrynewwb),
+    size         = 3.5,
+    fontface     = "bold",
+    box.padding  = 0.5,
+    point.padding = 0.3,
+    segment.color = "gray50",
+    max.overlaps  = 20,
+    min.segment.length = 0
+  )
+```
+
+The scatter plot reveals a striking geographic divide. Sub-Saharan
+African countries dominate the upper-left quadrant — mobile-first
+inclusion — with Kenya (90% total, 88% mobile) and Ghana as extreme
+positive outliers in mobile money, achieving inclusion primarily
+through non-bank channels. By contrast, Niger (15% total) and Chad
+(21% total) sit in the lower-left as extreme negative outliers,
+severely financially excluded despite being in the same macro-region
+as the mobile money leaders.
+
+Mongolia emerges as an outlier from a different direction: near-
+universal account ownership (98%) achieved substantially through
+mobile money (64%), showing that middle-income countries can
+leapfrog traditional banking infrastructure. Lebanon stands out as
+a middle-income MENA country with exceptionally low financial
+inclusion (23% total, 3% mobile), reflecting its ongoing economic
+collapse.
+
+High-income countries (teal) cluster tightly in the lower-right —
+traditional banking dominant, mobile money near zero — consistent
+with the fact that the World Bank only collects mobile money data
+where it is relevant.
+
+# Conclusion
+
+Mobile money has created a new pathway to financial inclusion, but
+adoption remains highly uneven. The countries leading the mobile
+money revolution and those most severely excluded often share the
+same region — Sub-Saharan Africa — revealing that geography alone
+cannot explain financial exclusion. Structural factors including
+regulatory environments, infrastructure, and conflict appear to
+drive the divergence. Understanding these outliers is increasingly
+relevant as the World Bank and United Nations target universal
+financial inclusion by 2030.
